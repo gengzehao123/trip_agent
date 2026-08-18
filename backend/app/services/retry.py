@@ -3,6 +3,8 @@
 import asyncio
 from typing import Awaitable, Callable, TypeVar
 
+from .errors import is_retryable_error
+
 T = TypeVar("T")
 
 
@@ -14,7 +16,10 @@ async def arun_with_retry(
     max_attempts: int = 3,
     backoff_seconds: tuple[float, ...] = (1, 2),
 ) -> T:
-    """在单次超时限制内执行异步操作，失败后按退避重试。"""
+    """在单次超时限制内执行异步操作，失败后按退避重试。
+
+    仅重试瞬时错误（超时、网络等）；永久性错误（参数/白名单/JSON 解析等）立即抛出。
+    """
     last_error: Exception | None = None
 
     for attempt in range(max_attempts):
@@ -24,6 +29,8 @@ async def arun_with_retry(
             last_error = TimeoutError(f"{operation_name} 超时（{timeout_seconds:g} 秒）")
         except Exception as exc:
             last_error = exc
+            if not is_retryable_error(exc):
+                break  # 永久性错误不重试
 
         if attempt < max_attempts - 1:
             await asyncio.sleep(backoff_seconds[min(attempt, len(backoff_seconds) - 1)])

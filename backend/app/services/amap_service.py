@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from ..models.schemas import Location, POIInfo, WeatherInfo
 from .amap_tools import call_amap_tool, is_tool_allowed
 from .cache import TTLCache
+from .errors import classify_error
 from .retry import arun_with_retry
 from .tool_logger import log_tool_call
 
@@ -155,7 +156,7 @@ class AmapService:
             _cache.set(cache_key, pois, CACHE_TTL_POI_SEARCH)
             return pois
         except Exception as e:
-            print(f"❌ POI搜索失败: {str(e)}")
+            print(f"⚠️ 降级: POI搜索失败[{classify_error(e)}]: {str(e)}")
             return []
 
     async def get_weather(self, city: str) -> List[WeatherInfo]:
@@ -191,7 +192,7 @@ class AmapService:
             _cache.set(cache_key, weather, CACHE_TTL_WEATHER)
             return weather
         except Exception as e:
-            print(f"❌ 天气查询失败: {str(e)}")
+            print(f"⚠️ 降级: 天气查询失败[{classify_error(e)}]: {str(e)}")
             return []
 
     async def plan_route(
@@ -238,7 +239,7 @@ class AmapService:
                 "description": "；".join(instructions),
             }
         except Exception as e:
-            print(f"❌ 路线规划失败: {str(e)}")
+            print(f"⚠️ 降级: 路线规划失败[{classify_error(e)}]: {str(e)}")
             return {}
 
     async def geocode(self, address: str, city: Optional[str] = None) -> Optional[Location]:
@@ -264,7 +265,7 @@ class AmapService:
                 _cache.set(cache_key, location, CACHE_TTL_GEOCODE)
             return location
         except Exception as e:
-            print(f"❌ 地理编码失败: {str(e)}")
+            print(f"⚠️ 降级: 地理编码失败[{classify_error(e)}]: {str(e)}")
             return None
 
     async def get_poi_detail(self, poi_id: str) -> Dict[str, Any]:
@@ -287,7 +288,7 @@ class AmapService:
             _cache.set(cache_key, detail, CACHE_TTL_POI_DETAIL)
             return detail
         except Exception as e:
-            print(f"❌ 获取POI详情失败: {str(e)}")
+            print(f"⚠️ 降级: POI详情失败[{classify_error(e)}]: {str(e)}")
             return {}
 
 
