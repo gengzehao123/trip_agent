@@ -1,5 +1,7 @@
 """高德地图MCP服务封装"""
 
+import json
+import re
 from typing import List, Dict, Any, Optional
 from hello_agents.tools import MCPTool
 from ..config import get_settings
@@ -53,6 +55,64 @@ class AmapService:
     def __init__(self):
         """初始化服务"""
         self.mcp_tool = get_amap_mcp_tool()
+
+    @staticmethod
+    def _parse_json_result(result: Any) -> Any:
+        """从 MCP 返回值中提取 JSON，兼容代码块和文本包装。"""
+        if isinstance(result, (dict, list)):
+            return result
+
+        if not isinstance(result, str):
+            raise ValueError("MCP 返回结果不是 JSON 或字符串")
+
+        text = result.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            object_match = re.search(r"\{.*\}", text, re.DOTALL)
+            if object_match:
+                return json.loads(object_match.group(0))
+            array_match = re.search(r"\[.*\]", text, re.DOTALL)
+            if array_match:
+                return json.loads(array_match.group(0))
+            raise ValueError("MCP 返回结果中未找到有效 JSON")
+
+    @staticmethod
+    def _first_value(data: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+        """从多个候选字段名中取第一个非空值。"""
+        for key in keys:
+            value = data.get(key)
+            if value is not None and value != "":
+                return value
+        return default
+
+    @staticmethod
+    def _parse_location(value: Any) -> Optional[Location]:
+        """解析高德常见的 longitude,latitude 坐标格式。"""
+        if isinstance(value, dict):
+            longitude = value.get("longitude", value.get("lng"))
+            latitude = value.get("latitude", value.get("lat"))
+            if longitude is not None and latitude is not None:
+                return Location(longitude=float(longitude), latitude=float(latitude))
+
+        if isinstance(value, str):
+            parts = [part.strip() for part in value.split(",")]
+            if len(parts) == 2:
+                return Location(longitude=float(parts[0]), latitude=float(parts[1]))
+
+        return None
+
+    @staticmethod
+    def _unwrap_payload(payload: Any, *keys: str) -> Any:
+        """从常见包装字段中取出实际数据。"""
+        if isinstance(payload, dict):
+            for key in keys:
+                if key in payload:
+                    return payload[key]
+        return payload
     
     def search_poi(self, keywords: str, city: str, citylimit: bool = True) -> List[POIInfo]:
         """
@@ -83,8 +143,24 @@ class AmapService:
             # 这里简化处理,实际应该解析JSON
             print(f"POI搜索结果: {result[:200]}...")  # 打印前200字符
             
-            # TODO: 解析实际的POI数据
-            return []
+            payload = self._unwrap_payload(self._parse_json_result(result), "pois", "data", "results")
+            if isinstance(payload, dict):
+                payload = payload.get("pois", payload.get("results", []))
+
+            pois = []
+            for item in payload if isinstance(payload, list) else []:
+                location = self._parse_location(item.get("location"))
+                if not location:
+                    continue
+                pois.append(POIInfo(
+                    id=str(self._first_value(item, "id", "poi_id", default="")),
+                    name=str(self._first_value(item, "name", default="")),
+                    type=str(self._first_value(item, "type", "typecode", default="")),
+                    address=str(self._first_value(item, "address", default="")),
+                    location=location,
+                    tel=self._first_value(item, "tel", "telephone"),
+                ))
+            return pois
             
         except Exception as e:
             print(f"❌ POI搜索失败: {str(e)}")
@@ -112,8 +188,22 @@ class AmapService:
             
             print(f"天气查询结果: {result[:200]}...")
             
-            # TODO: 解析实际的天气数据
-            return []
+            payload = self._unwrap_payload(self._parse_json_result(result), "forecasts", "data", "weather")
+            if isinstance(payload, dict):
+                payload = payload.get("casts", payload.get("forecasts", []))
+
+            weather = []
+            for item in payload if isinstance(payload, list) else []:
+                weather.append(WeatherInfo(
+                    date=str(self._first_value(item, "date", "week", default="")),
+                    day_weather=str(self._first_value(item, "dayweather", "day_weather", default="")),
+                    night_weather=str(self._first_value(item, "nightweather", "night_weather", default="")),
+                    day_temp=self._first_value(item, "daytemp", "day_temp", default=0),
+                    night_temp=self._first_value(item, "nighttemp", "night_temp", default=0),
+                    wind_direction=str(self._first_value(item, "daywind", "wind_direction", default="")),
+                    wind_power=str(self._first_value(item, "daypower", "wind_power", default="")),
+                ))
+            return weather
             
         except Exception as e:
             print(f"❌ 天气查询失败: {str(e)}")
@@ -178,8 +268,15 @@ class AmapService:
             
             print(f"路线规划结果: {result[:200]}...")
             
-            # TODO: 解析实际的路线数据
-            return {}
+            payload = self._unwrap_payload(self._parse_json_result(result), "route", "data", "result")
+            if not isinstance(payload, dict):
+                return {}
+            return {
+                "distance": float(self._first_value(payload, "distance", default=0)),
+                "duration": int(float(self._first_value(payload, "duration", default=0))),
+                "route_type": self._first_value(payload, "route_type", default=route_type),
+                "description": self._first_value(payload, "description", default=""),
+            }
             
         except Exception as e:
             print(f"❌ 路线规划失败: {str(e)}")
@@ -209,8 +306,12 @@ class AmapService:
 
             print(f"地理编码结果: {result[:200]}...")
 
-            # TODO: 解析实际的坐标数据
-            return None
+            payload = self._unwrap_payload(self._parse_json_result(result), "location", "geocodes", "data", "result")
+            if isinstance(payload, list):
+                payload = payload[0] if payload else None
+            if isinstance(payload, dict):
+                payload = payload.get("location", payload)
+            return self._parse_location(payload)
 
         except Exception as e:
             print(f"❌ 地理编码失败: {str(e)}")
@@ -266,4 +367,3 @@ def get_amap_service() -> AmapService:
         _amap_service = AmapService()
     
     return _amap_service
-
