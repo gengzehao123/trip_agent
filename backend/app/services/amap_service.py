@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from ..models.schemas import Location, POIInfo, WeatherInfo
-from .amap_tools import call_amap_tool
+from .amap_tools import call_amap_tool, is_tool_allowed
 from .retry import arun_with_retry
 from .tool_logger import log_tool_call
 
@@ -16,6 +16,16 @@ class AmapService:
 
     async def _call(self, tool_name: str, arguments: Dict[str, Any], operation_name: str) -> Any:
         """调用 MCP 工具,带统一超时和重试,并记录工具调用日志。"""
+        if not is_tool_allowed(tool_name):
+            log_tool_call(
+                tool_name,
+                arguments,
+                duration_ms=0.0,
+                success=False,
+                error=f"工具不在白名单内: {tool_name}",
+            )
+            raise ValueError(f"工具调用被白名单拒绝: {tool_name}")
+
         start = time.perf_counter()
         try:
             result = await arun_with_retry(

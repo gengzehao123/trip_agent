@@ -12,6 +12,22 @@ _client: Optional[MultiServerMCPClient] = None
 _tools: Optional[Dict[str, BaseTool]] = None
 _lock = asyncio.Lock()
 
+# 允许调用的高德 MCP 工具白名单（本应用实际使用到的工具）
+ALLOWED_TOOLS = frozenset({
+    "maps_text_search",
+    "maps_weather",
+    "maps_direction_walking_by_address",
+    "maps_direction_driving_by_address",
+    "maps_direction_transit_integrated_by_address",
+    "maps_geo",
+    "maps_search_detail",
+})
+
+
+def is_tool_allowed(tool_name: str) -> bool:
+    """检查工具是否在白名单内。"""
+    return tool_name in ALLOWED_TOOLS
+
 
 async def _get_client() -> MultiServerMCPClient:
     global _client
@@ -45,6 +61,8 @@ async def get_amap_tools() -> Dict[str, BaseTool]:
 
 async def call_amap_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
     """直接调用指定高德 MCP 工具,返回其文本结果。"""
+    if not is_tool_allowed(tool_name):
+        raise ValueError(f"工具调用被白名单拒绝: {tool_name}")
     tools = await get_amap_tools()
     tool = tools.get(tool_name)
     if tool is None:
