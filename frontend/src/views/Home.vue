@@ -207,8 +207,8 @@
 import { ref, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { generateTripPlan } from '@/services/api'
-import type { TripFormData } from '@/types'
+import { createTripTask, getTaskStatus } from '@/services/api'
+import type { TripFormData, TripPlan } from '@/types'
 import type { Dayjs } from 'dayjs'
 
 const router = useRouter()
@@ -258,24 +258,6 @@ const handleSubmit = async () => {
   loadingProgress.value = 0
   loadingStatus.value = '正在初始化...'
 
-  // 模拟进度更新
-  const progressInterval = setInterval(() => {
-    if (loadingProgress.value < 90) {
-      loadingProgress.value += 10
-
-      // 更新状态文本
-      if (loadingProgress.value <= 30) {
-        loadingStatus.value = '🔍 正在搜索景点...'
-      } else if (loadingProgress.value <= 50) {
-        loadingStatus.value = '🌤️ 正在查询天气...'
-      } else if (loadingProgress.value <= 70) {
-        loadingStatus.value = '🏨 正在推荐酒店...'
-      } else {
-        loadingStatus.value = '📋 正在生成行程计划...'
-      }
-    }
-  }, 500)
-
   try {
     const requestData: TripFormData = {
       city: formData.city,
@@ -288,27 +270,25 @@ const handleSubmit = async () => {
       free_text_input: formData.free_text_input
     }
 
-    const response = await generateTripPlan(requestData)
+    // 创建任务,拿到 task_id
+    const task = await createTripTask(requestData)
 
-    clearInterval(progressInterval)
+    // 轮询真实进度,直到完成或失败
+    const plan = await pollTaskUntilDone(task.task_id)
+
     loadingProgress.value = 100
     loadingStatus.value = '✅ 完成!'
 
-    if (response.success && response.data) {
-      // 保存到sessionStorage
-      sessionStorage.setItem('tripPlan', JSON.stringify(response.data))
+    // 保存到sessionStorage
+    sessionStorage.setItem('tripPlan', JSON.stringify(plan))
 
-      message.success('旅行计划生成成功!')
+    message.success('旅行计划生成成功!')
 
-      // 短暂延迟后跳转
-      setTimeout(() => {
-        router.push('/result')
-      }, 500)
-    } else {
-      message.error(response.message || '生成失败')
-    }
+    // 短暂延迟后跳转
+    setTimeout(() => {
+      router.push('/result')
+    }, 500)
   } catch (error: any) {
-    clearInterval(progressInterval)
     message.error(error.message || '生成旅行计划失败,请稍后重试')
   } finally {
     setTimeout(() => {
@@ -317,6 +297,29 @@ const handleSubmit = async () => {
       loadingStatus.value = ''
     }, 1000)
   }
+}
+
+// 轮询任务状态,返回最终 TripPlan
+const pollTaskUntilDone = async (taskId: string): Promise<TripPlan> => {
+  const maxAttempts = 300 // 最多轮询 300 次
+  const intervalMs = 1000 // 每秒一次
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const status = await getTaskStatus(taskId)
+    loadingProgress.value = status.progress
+    loadingStatus.value = status.message
+
+    if (status.status === 'completed' && status.data) {
+      return status.data
+    }
+    if (status.status === 'failed') {
+      throw new Error(status.error || status.message || '生成旅行计划失败')
+    }
+
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+
+  throw new Error('生成旅行计划超时,请稍后重试')
 }
 </script>
 

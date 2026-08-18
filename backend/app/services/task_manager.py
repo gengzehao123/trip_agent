@@ -38,11 +38,12 @@ class TripTaskManager:
 
     async def run(self, task_id: str, request: TripRequest, planner: Any) -> None:
         try:
-            self.update(task_id, status="running", stage="attraction_search", progress=10, message="正在搜索景点")
-            self.update(task_id, stage="weather_query", progress=35, message="正在查询天气")
-            self.update(task_id, stage="hotel_search", progress=55, message="正在推荐酒店")
-            self.update(task_id, stage="planning", progress=75, message="正在生成行程计划")
-            plan: TripPlan = await planner.plan_trip(request)
+            self.update(task_id, status="running", stage="search_attractions", progress=5, message="🔍 正在搜索景点")
+
+            async def on_progress(stage: str, message: str, progress: int) -> None:
+                self.update(task_id, stage=stage, message=message, progress=progress)
+
+            plan: TripPlan = await planner.plan_trip(request, on_progress=on_progress)
             self.update(
                 task_id,
                 status="completed",

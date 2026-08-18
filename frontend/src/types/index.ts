@@ -93,3 +93,20 @@ export interface TripPlanResponse {
   data?: TripPlan
 }
 
+export interface TripTaskCreateResponse {
+  task_id: string
+  status: string
+  message: string
+}
+
+export interface TaskStatusResponse {
+  task_id: string
+  status: string
+  stage: string
+  progress: number
+  message: string
+  data?: TripPlan
+  error?: string
+  updated_at: string
+}
+

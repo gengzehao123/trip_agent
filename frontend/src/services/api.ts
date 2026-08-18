@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { TripFormData, TripPlanResponse } from '@/types'
+import type { TripFormData, TripTaskCreateResponse, TaskStatusResponse } from '@/types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -36,15 +36,28 @@ apiClient.interceptors.response.use(
 )
 
 /**
- * 生成旅行计划
+ * 创建旅行规划任务（返回 task_id）
  */
-export async function generateTripPlan(formData: TripFormData): Promise<TripPlanResponse> {
+export async function createTripTask(formData: TripFormData): Promise<TripTaskCreateResponse> {
   try {
-    const response = await apiClient.post<TripPlanResponse>('/api/trip/plan', formData)
+    const response = await apiClient.post<TripTaskCreateResponse>('/api/trip/plan', formData)
     return response.data
   } catch (error: any) {
-    console.error('生成旅行计划失败:', error)
-    throw new Error(error.response?.data?.detail || error.message || '生成旅行计划失败')
+    console.error('创建旅行规划任务失败:', error)
+    throw new Error(error.response?.data?.detail || error.message || '创建旅行规划任务失败')
+  }
+}
+
+/**
+ * 查询旅行规划任务状态（含真实进度）
+ */
+export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse> {
+  try {
+    const response = await apiClient.get<TaskStatusResponse>(`/api/trip/tasks/${taskId}`)
+    return response.data
+  } catch (error: any) {
+    console.error('查询任务状态失败:', error)
+    throw new Error(error.response?.data?.detail || error.message || '查询任务状态失败')
   }
 }
 
@@ -62,4 +75,3 @@ export async function healthCheck(): Promise<any> {
 }
 
 export default apiClient
-

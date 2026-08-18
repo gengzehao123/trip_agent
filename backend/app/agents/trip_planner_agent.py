@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -17,6 +17,17 @@ from ..models.schemas import (
 )
 from ..services.amap_service import get_amap_service
 from ..services.llm_service import get_llm
+
+# 进度回调: (stage, message, progress)
+ProgressCallback = Callable[[str, str, int], Awaitable[None]]
+
+# 各节点完成后的真实进度映射
+NODE_PROGRESS = {
+    "search_attractions": ("search_attractions", "🔍 景点搜索完成", 30),
+    "query_weather": ("weather_query", "🌤️ 天气查询完成", 55),
+    "search_hotels": ("hotel_search", "🏨 酒店推荐完成", 75),
+    "plan_itinerary": ("planning", "📋 行程计划生成完成", 92),
+}
 
 
 PLANNER_PROMPT = """你是行程规划专家。你的任务是根据景点信息和天气信息,生成详细的旅行计划。
@@ -153,10 +164,25 @@ class LangGraphTripPlanner:
         plan = await self._generate_plan(prompt, request)
         return {"plan": plan}
 
-    async def plan_trip(self, request: TripRequest) -> TripPlan:
-        """执行完整工作流,返回旅行计划。"""
-        result = await self.graph.ainvoke({"request": request})
-        plan = result.get("plan")
+    async def plan_trip(self, request: TripRequest, on_progress: Optional[ProgressCallback] = None) -> TripPlan:
+        """执行完整工作流,返回旅行计划。
+
+        当提供 on_progress 回调时,使用 astream 逐节点推送真实进度:
+        每完成一个节点回调一次 on_progress(stage, message, progress)。
+        """
+        if on_progress is None:
+            result = await self.graph.ainvoke({"request": request})
+            plan = result.get("plan")
+        else:
+            plan = None
+            async for chunk in self.graph.astream({"request": request}, stream_mode="updates"):
+                for node_name, updates in chunk.items():
+                    if node_name in NODE_PROGRESS:
+                        stage, message, progress = NODE_PROGRESS[node_name]
+                        await on_progress(stage, message, progress)
+                    if node_name == "plan_itinerary":
+                        plan = updates.get("plan")
+
         if plan is None:
             return self._create_fallback_plan(request)
         return plan
