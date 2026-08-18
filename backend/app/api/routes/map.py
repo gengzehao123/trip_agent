@@ -124,6 +124,9 @@ async def plan_route(request: RouteRequest):
             destination_city=request.destination_city,
             route_type=request.route_type
         )
+
+        if not route_info:
+            raise HTTPException(status_code=502, detail="高德地图路线服务暂时不可用")
         
         return RouteResponse(
             success=True,
@@ -131,6 +134,8 @@ async def plan_route(request: RouteRequest):
             data=route_info
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ 路线规划失败: {str(e)}")
         raise HTTPException(
@@ -160,4 +165,3 @@ async def health_check():
             status_code=503,
             detail=f"服务不可用: {str(e)}"
         )
-

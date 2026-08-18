@@ -7,6 +7,7 @@ from hello_agents.tools import MCPTool
 from ..services.llm_service import get_llm
 from ..models.schemas import TripRequest, TripPlan, DayPlan, Attraction, Meal, WeatherInfo, Location, Hotel
 from ..config import get_settings
+from ..services.retry import run_with_retry
 
 # ============ Agent提示词 ============
 
@@ -242,25 +243,25 @@ class MultiAgentTripPlanner:
             # 步骤1: 景点搜索Agent搜索景点
             print("📍 步骤1: 搜索景点...")
             attraction_query = self._build_attraction_query(request)
-            attraction_response = self.attraction_agent.run(attraction_query)
+            attraction_response = self._run_agent(self.attraction_agent, attraction_query, "景点搜索 Agent")
             print(f"景点搜索结果: {attraction_response[:200]}...\n")
 
             # 步骤2: 天气查询Agent查询天气
             print("🌤️  步骤2: 查询天气...")
             weather_query = f"请查询{request.city}的天气信息"
-            weather_response = self.weather_agent.run(weather_query)
+            weather_response = self._run_agent(self.weather_agent, weather_query, "天气查询 Agent")
             print(f"天气查询结果: {weather_response[:200]}...\n")
 
             # 步骤3: 酒店推荐Agent搜索酒店
             print("🏨 步骤3: 搜索酒店...")
             hotel_query = f"请搜索{request.city}的{request.accommodation}酒店"
-            hotel_response = self.hotel_agent.run(hotel_query)
+            hotel_response = self._run_agent(self.hotel_agent, hotel_query, "酒店推荐 Agent")
             print(f"酒店搜索结果: {hotel_response[:200]}...\n")
 
             # 步骤4: 行程规划Agent整合信息生成计划
             print("📋 步骤4: 生成行程计划...")
             planner_query = self._build_planner_query(request, attraction_response, weather_response, hotel_response)
-            planner_response = self.planner_agent.run(planner_query)
+            planner_response = self._run_agent(self.planner_agent, planner_query, "行程规划 Agent")
             print(f"行程规划结果: {planner_response[:300]}...\n")
 
             # 解析最终计划
@@ -277,6 +278,11 @@ class MultiAgentTripPlanner:
             import traceback
             traceback.print_exc()
             return self._create_fallback_plan(request)
+
+    @staticmethod
+    def _run_agent(agent: SimpleAgent, prompt: str, operation_name: str) -> str:
+        """统一执行 Agent，提供 30 秒超时和最多 3 次重试。"""
+        return run_with_retry(lambda: agent.run(prompt), operation_name=operation_name)
     
     def _build_attraction_query(self, request: TripRequest) -> str:
         """构建景点搜索查询 - 直接包含工具调用"""
@@ -359,14 +365,52 @@ class MultiAgentTripPlanner:
             data = json.loads(json_str)
             
             # 转换为TripPlan对象
-            trip_plan = TripPlan(**data)
+            trip_plan = self._validate_trip_plan(data, request)
             
             return trip_plan
             
         except Exception as e:
             print(f"⚠️  解析响应失败: {str(e)}")
-            print(f"   将使用备用方案生成计划")
-            return self._create_fallback_plan(request)
+            print(f"   尝试请求 Agent 修复 JSON")
+            try:
+                repair_prompt = (
+                    "上一次旅行计划输出未通过校验。请只返回完整、合法的 JSON，"
+                    f"并生成 {request.city} {request.travel_days} 天行程。"
+                )
+                repaired = self._run_agent(self.planner_agent, repair_prompt, "行程规划修复 Agent")
+                repaired_data = self._extract_json(repaired)
+                return self._validate_trip_plan(repaired_data, request)
+            except Exception as repair_error:
+                print(f"⚠️ 修复行程计划失败: {repair_error}")
+                return self._create_fallback_plan(request)
+
+    @staticmethod
+    def _extract_json(response: str) -> Dict[str, Any]:
+        """从 Agent 文本中提取 JSON 对象。"""
+        if not isinstance(response, str):
+            raise ValueError("Agent 响应不是字符串")
+        if "```" in response:
+            parts = response.split("```")
+            response = parts[1] if len(parts) > 1 else response
+            response = response.removeprefix("json").strip()
+        start, end = response.find("{"), response.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("响应中未找到 JSON 对象")
+        return json.loads(response[start:end + 1])
+
+    @staticmethod
+    def _validate_trip_plan(data: Dict[str, Any], request: TripRequest) -> TripPlan:
+        """校验结构化计划和基本业务约束。"""
+        plan = TripPlan.model_validate(data)
+        if len(plan.days) != request.travel_days:
+            raise ValueError("行程天数与请求不一致")
+        for day in plan.days:
+            if not day.attractions:
+                raise ValueError(f"{day.date} 没有景点")
+            meal_types = {meal.type for meal in day.meals}
+            if not {"breakfast", "lunch", "dinner"}.issubset(meal_types):
+                raise ValueError(f"{day.date} 缺少早中晚餐")
+        return plan
     
     def _create_fallback_plan(self, request: TripRequest) -> TripPlan:
         """创建备用计划(当Agent失败时)"""
@@ -427,4 +471,3 @@ def get_trip_planner_agent() -> MultiAgentTripPlanner:
         _multi_agent_planner = MultiAgentTripPlanner()
 
     return _multi_agent_planner
-

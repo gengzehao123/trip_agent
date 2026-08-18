@@ -1,19 +1,22 @@
 """旅行规划API路由"""
 
+import asyncio
 from fastapi import APIRouter, HTTPException
 from ...models.schemas import (
     TripRequest,
-    TripPlanResponse,
+    TaskStatusResponse,
+    TripTaskCreateResponse,
     ErrorResponse
 )
 from ...agents.trip_planner_agent import get_trip_planner_agent
+from ...services.task_manager import task_manager
 
 router = APIRouter(prefix="/trip", tags=["旅行规划"])
 
 
 @router.post(
     "/plan",
-    response_model=TripPlanResponse,
+    response_model=TripTaskCreateResponse,
     summary="生成旅行计划",
     description="根据用户输入的旅行需求,生成详细的旅行计划"
 )
@@ -35,20 +38,13 @@ async def plan_trip(request: TripRequest):
         print(f"   天数: {request.travel_days}")
         print(f"{'='*60}\n")
 
-        # 获取Agent实例
-        print("🔄 获取多智能体系统实例...")
+        task = task_manager.create()
         agent = get_trip_planner_agent()
-
-        # 生成旅行计划
-        print("🚀 开始生成旅行计划...")
-        trip_plan = agent.plan_trip(request)
-
-        print("✅ 旅行计划生成成功,准备返回响应\n")
-
-        return TripPlanResponse(
-            success=True,
-            message="旅行计划生成成功",
-            data=trip_plan
+        asyncio.create_task(task_manager.run(task.task_id, request, agent))
+        return TripTaskCreateResponse(
+            task_id=task.task_id,
+            status=task.status,
+            message=task.message,
         )
 
     except Exception as e:
@@ -59,6 +55,18 @@ async def plan_trip(request: TripRequest):
             status_code=500,
             detail=f"生成旅行计划失败: {str(e)}"
         )
+
+
+@router.get(
+    "/tasks/{task_id}",
+    response_model=TaskStatusResponse,
+    summary="查询旅行规划任务状态",
+)
+async def get_task_status(task_id: str):
+    task = task_manager.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return task
 
 
 @router.get(
@@ -83,4 +91,3 @@ async def health_check():
             status_code=503,
             detail=f"服务不可用: {str(e)}"
         )
-

@@ -1,15 +1,15 @@
 import json
 
-from app.models.schemas import Location, POIInfo, RouteInfo, WeatherInfo
-from app.services.amap_service import AmapService
+from ..app.models.schemas import Location, POIInfo, RouteInfo, WeatherInfo
+from ..app.services.amap_service import AmapService
 
 
 class FakeMCPTool:
-    def __init__(self, result):
-        self.result = result
+    def __init__(self, results):
+        self.results = iter(results if isinstance(results, list) else [results])
 
     def run(self, _request):
-        return self.result
+        return next(self.results)
 
 
 def service_with_result(result):
@@ -19,16 +19,22 @@ def service_with_result(result):
 
 
 def test_search_poi_parses_wrapped_json_result():
-    result = json.dumps({"pois": [{
+    search_result = json.dumps({"pois": [{
+        "id": "B001",
+        "name": "故宫",
+        "typecode": "风景名胜",
+        "address": "北京市东城区景山前街4号",
+    }]})
+    detail_result = json.dumps({
         "id": "B001",
         "name": "故宫",
         "type": "风景名胜",
         "address": "北京市东城区景山前街4号",
         "location": "116.397128,39.916527",
         "tel": "010-12345678",
-    }]})
+    })
 
-    pois = service_with_result(result).search_poi("故宫", "北京")
+    pois = service_with_result([search_result, detail_result]).search_poi("故宫", "北京")
 
     assert pois == [POIInfo(
         id="B001",
@@ -65,12 +71,11 @@ def test_get_weather_parses_json_code_block_and_temperature_units():
 
 
 def test_plan_route_parses_route_info():
-    result = json.dumps({"route": {
+    result = json.dumps({"route": {"paths": [{
         "distance": "1200",
         "duration": "900",
-        "route_type": "walking",
-        "description": "步行约15分钟",
-    }})
+        "steps": [{"instruction": "沿道路步行"}],
+    }]}})
 
     route = service_with_result(result).plan_route("起点", "终点")
 
@@ -78,12 +83,12 @@ def test_plan_route_parses_route_info():
         distance=1200,
         duration=900,
         route_type="walking",
-        description="步行约15分钟",
+        description="沿道路步行",
     ).model_dump()
 
 
 def test_geocode_parses_location_string():
-    result = json.dumps({"location": "116.397128,39.916527"})
+    result = json.dumps({"return": [{"location": "116.397128,39.916527"}]})
 
     location = service_with_result(result).geocode("故宫", "北京")
 

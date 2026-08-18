@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from hello_agents.tools import MCPTool
 from ..config import get_settings
 from ..models.schemas import Location, POIInfo, WeatherInfo
+from .retry import run_with_retry
 
 # 全局MCP工具实例
 _amap_mcp_tool = None
@@ -55,6 +56,13 @@ class AmapService:
     def __init__(self):
         """初始化服务"""
         self.mcp_tool = get_amap_mcp_tool()
+
+    def _run_mcp(self, request: Dict[str, Any], operation_name: str) -> Any:
+        """调用 MCP，并提供统一的超时和重试。"""
+        return run_with_retry(
+            lambda: self.mcp_tool.run(request),
+            operation_name=operation_name,
+        )
 
     @staticmethod
     def _parse_json_result(result: Any) -> Any:
@@ -128,7 +136,7 @@ class AmapService:
         """
         try:
             # 调用MCP工具
-            result = self.mcp_tool.run({
+            result = self._run_mcp({
                 "action": "call_tool",
                 "tool_name": "maps_text_search",
                 "arguments": {
@@ -136,12 +144,12 @@ class AmapService:
                     "city": city,
                     "citylimit": str(citylimit).lower()
                 }
-            })
+            }, "高德 POI 搜索")
             
             # 解析结果
             # 注意: MCP工具返回的是字符串,需要解析
             # 这里简化处理,实际应该解析JSON
-            print(f"POI搜索结果: {result[:200]}...")  # 打印前200字符
+            print(f"POI搜索结果: {str(result)[:200]}...")  # 打印前200字符
             
             payload = self._unwrap_payload(self._parse_json_result(result), "pois", "data", "results")
             if isinstance(payload, dict):
@@ -149,16 +157,21 @@ class AmapService:
 
             pois = []
             for item in payload if isinstance(payload, list) else []:
-                location = self._parse_location(item.get("location"))
+                detail = {}
+                poi_id = self._first_value(item, "id", "poi_id", default="")
+                if poi_id:
+                    detail = self.get_poi_detail(str(poi_id))
+                merged = {**item, **detail}
+                location = self._parse_location(merged.get("location"))
                 if not location:
                     continue
                 pois.append(POIInfo(
-                    id=str(self._first_value(item, "id", "poi_id", default="")),
-                    name=str(self._first_value(item, "name", default="")),
-                    type=str(self._first_value(item, "type", "typecode", default="")),
-                    address=str(self._first_value(item, "address", default="")),
+                    id=str(self._first_value(merged, "id", "poi_id", default="")),
+                    name=str(self._first_value(merged, "name", default="")),
+                    type=str(self._first_value(merged, "type", "typecode", default="")),
+                    address=str(self._first_value(merged, "address", default="")),
                     location=location,
-                    tel=self._first_value(item, "tel", "telephone"),
+                    tel=self._first_value(merged, "tel", "telephone"),
                 ))
             return pois
             
@@ -178,19 +191,19 @@ class AmapService:
         """
         try:
             # 调用MCP工具
-            result = self.mcp_tool.run({
+            result = self._run_mcp({
                 "action": "call_tool",
                 "tool_name": "maps_weather",
                 "arguments": {
                     "city": city
                 }
-            })
+            }, "高德天气查询")
             
-            print(f"天气查询结果: {result[:200]}...")
+            print(f"天气查询结果: {str(result)[:200]}...")
             
-            payload = self._unwrap_payload(self._parse_json_result(result), "forecasts", "data", "weather")
+            payload = self._parse_json_result(result)
             if isinstance(payload, dict):
-                payload = payload.get("casts", payload.get("forecasts", []))
+                payload = payload.get("forecasts", payload.get("casts", payload.get("data", [])))
 
             weather = []
             for item in payload if isinstance(payload, list) else []:
@@ -260,22 +273,27 @@ class AmapService:
                     arguments["destination_city"] = destination_city
             
             # 调用MCP工具
-            result = self.mcp_tool.run({
+            result = self._run_mcp({
                 "action": "call_tool",
                 "tool_name": tool_name,
                 "arguments": arguments
-            })
+            }, "高德路线规划")
             
-            print(f"路线规划结果: {result[:200]}...")
-            
-            payload = self._unwrap_payload(self._parse_json_result(result), "route", "data", "result")
-            if not isinstance(payload, dict):
+            print(f"路线规划结果: {str(result)[:200]}...")
+
+            payload = self._parse_json_result(result)
+            route = payload.get("route", {}) if isinstance(payload, dict) else {}
+            paths = route.get("paths", []) if isinstance(route, dict) else []
+            if not paths:
                 return {}
+            path = paths[0]
+            steps = path.get("steps", []) if isinstance(path, dict) else []
+            instructions = [step.get("instruction") for step in steps if isinstance(step, dict) and step.get("instruction")]
             return {
-                "distance": float(self._first_value(payload, "distance", default=0)),
-                "duration": int(float(self._first_value(payload, "duration", default=0))),
-                "route_type": self._first_value(payload, "route_type", default=route_type),
-                "description": self._first_value(payload, "description", default=""),
+                "distance": float(self._first_value(path, "distance", default=0)),
+                "duration": int(float(self._first_value(path, "duration", default=0))),
+                "route_type": route_type,
+                "description": "；".join(instructions),
             }
             
         except Exception as e:
@@ -298,20 +316,18 @@ class AmapService:
             if city:
                 arguments["city"] = city
 
-            result = self.mcp_tool.run({
+            result = self._run_mcp({
                 "action": "call_tool",
                 "tool_name": "maps_geo",
                 "arguments": arguments
-            })
+            }, "高德地理编码")
 
-            print(f"地理编码结果: {result[:200]}...")
+            print(f"地理编码结果: {str(result)[:200]}...")
 
-            payload = self._unwrap_payload(self._parse_json_result(result), "location", "geocodes", "data", "result")
-            if isinstance(payload, list):
-                payload = payload[0] if payload else None
-            if isinstance(payload, dict):
-                payload = payload.get("location", payload)
-            return self._parse_location(payload)
+            payload = self._parse_json_result(result)
+            geocodes = payload.get("return", []) if isinstance(payload, dict) else []
+            first = geocodes[0] if isinstance(geocodes, list) and geocodes else None
+            return self._parse_location(first.get("location") if isinstance(first, dict) else first)
 
         except Exception as e:
             print(f"❌ 地理编码失败: {str(e)}")
@@ -328,27 +344,22 @@ class AmapService:
             POI详情信息
         """
         try:
-            result = self.mcp_tool.run({
+            result = self._run_mcp({
                 "action": "call_tool",
                 "tool_name": "maps_search_detail",
                 "arguments": {
                     "id": poi_id
                 }
-            })
+            }, "高德 POI 详情")
 
-            print(f"POI详情结果: {result[:200]}...")
+            print(f"POI详情结果: {str(result)[:200]}...")
 
             # 解析结果并提取图片
             import json
             import re
 
-            # 尝试从结果中提取JSON
-            json_match = re.search(r'\{.*\}', result, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                return data
-
-            return {"raw": result}
+            data = self._parse_json_result(result)
+            return data if isinstance(data, dict) else {"raw": result}
 
         except Exception as e:
             print(f"❌ 获取POI详情失败: {str(e)}")

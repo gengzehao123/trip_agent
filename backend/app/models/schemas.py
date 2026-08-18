@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Union
 from pydantic import BaseModel, Field, field_validator
-from datetime import date
+from datetime import date, datetime
 
 
 # ============ 请求模型 ============
@@ -157,6 +157,25 @@ class TripPlanResponse(BaseModel):
     data: Optional[TripPlan] = Field(default=None, description="旅行计划数据")
 
 
+class TripTaskCreateResponse(BaseModel):
+    """旅行规划任务创建响应"""
+    task_id: str
+    status: str
+    message: str
+
+
+class TaskStatusResponse(BaseModel):
+    """旅行规划任务状态"""
+    task_id: str
+    status: str
+    stage: str
+    progress: int = Field(ge=0, le=100)
+    message: str = ""
+    data: Optional[TripPlan] = None
+    error: Optional[str] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class POIInfo(BaseModel):
     """POI信息"""
     id: str = Field(..., description="POI ID")
@@ -203,4 +222,3 @@ class ErrorResponse(BaseModel):
     success: bool = Field(default=False, description="是否成功")
     message: str = Field(..., description="错误消息")
     error_code: Optional[str] = Field(default=None, description="错误代码")
-
