@@ -7,8 +7,18 @@ from typing import Any, Dict, List, Optional
 
 from ..models.schemas import Location, POIInfo, WeatherInfo
 from .amap_tools import call_amap_tool, is_tool_allowed
+from .cache import TTLCache
 from .retry import arun_with_retry
 from .tool_logger import log_tool_call
+
+# 缓存 TTL（秒）
+CACHE_TTL_WEATHER = 30 * 60          # 天气 30 分钟
+CACHE_TTL_POI_SEARCH = 60 * 60       # POI 搜索 1 小时
+CACHE_TTL_POI_DETAIL = 24 * 60 * 60  # POI 详情 24 小时
+CACHE_TTL_GEOCODE = 24 * 60 * 60     # 地理编码 24 小时
+
+# 进程内 TTL 缓存（单实例部署；多实例时应换 Redis 等共享缓存）
+_cache = TTLCache()
 
 
 class AmapService:
@@ -108,7 +118,12 @@ class AmapService:
         return payload
 
     async def search_poi(self, keywords: str, city: str, citylimit: bool = True) -> List[POIInfo]:
-        """搜索 POI。"""
+        """搜索 POI(带缓存)。"""
+        cache_key = f"poi:{city}:{keywords}:{str(citylimit).lower()}"
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             result = await self._call(
                 "maps_text_search",
@@ -137,13 +152,19 @@ class AmapService:
                     location=location,
                     tel=self._first_value(merged, "tel", "telephone"),
                 ))
+            _cache.set(cache_key, pois, CACHE_TTL_POI_SEARCH)
             return pois
         except Exception as e:
             print(f"❌ POI搜索失败: {str(e)}")
             return []
 
     async def get_weather(self, city: str) -> List[WeatherInfo]:
-        """查询天气。"""
+        """查询天气(带缓存)。"""
+        cache_key = f"weather:{city}"
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             result = await self._call(
                 "maps_weather",
@@ -167,6 +188,7 @@ class AmapService:
                     wind_direction=str(self._first_value(item, "daywind", "wind_direction", default="")),
                     wind_power=str(self._first_value(item, "daypower", "wind_power", default="")),
                 ))
+            _cache.set(cache_key, weather, CACHE_TTL_WEATHER)
             return weather
         except Exception as e:
             print(f"❌ 天气查询失败: {str(e)}")
@@ -220,7 +242,12 @@ class AmapService:
             return {}
 
     async def geocode(self, address: str, city: Optional[str] = None) -> Optional[Location]:
-        """地理编码(地址转坐标)。"""
+        """地理编码(地址转坐标,带缓存)。"""
+        cache_key = f"geocode:{city or ''}:{address}"
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             arguments = {"address": address}
             if city:
@@ -232,13 +259,21 @@ class AmapService:
             payload = self._parse_json_result(result)
             geocodes = payload.get("return", []) if isinstance(payload, dict) else []
             first = geocodes[0] if isinstance(geocodes, list) and geocodes else None
-            return self._parse_location(first.get("location") if isinstance(first, dict) else first)
+            location = self._parse_location(first.get("location") if isinstance(first, dict) else first)
+            if location is not None:
+                _cache.set(cache_key, location, CACHE_TTL_GEOCODE)
+            return location
         except Exception as e:
             print(f"❌ 地理编码失败: {str(e)}")
             return None
 
     async def get_poi_detail(self, poi_id: str) -> Dict[str, Any]:
-        """获取 POI 详情。"""
+        """获取 POI 详情(带缓存)。"""
+        cache_key = f"poi_detail:{poi_id}"
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             result = await self._call(
                 "maps_search_detail",
@@ -248,7 +283,9 @@ class AmapService:
             print(f"POI详情结果: {str(result)[:200]}...")
 
             data = self._parse_json_result(result)
-            return data if isinstance(data, dict) else {"raw": result}
+            detail = data if isinstance(data, dict) else {"raw": result}
+            _cache.set(cache_key, detail, CACHE_TTL_POI_DETAIL)
+            return detail
         except Exception as e:
             print(f"❌ 获取POI详情失败: {str(e)}")
             return {}
