@@ -2,22 +2,42 @@
 
 import json
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from ..models.schemas import Location, POIInfo, WeatherInfo
 from .amap_tools import call_amap_tool
 from .retry import arun_with_retry
+from .tool_logger import log_tool_call
 
 
 class AmapService:
     """高德地图服务封装类(异步)。"""
 
     async def _call(self, tool_name: str, arguments: Dict[str, Any], operation_name: str) -> Any:
-        """调用 MCP 工具,带统一超时和重试。"""
-        return await arun_with_retry(
-            lambda: call_amap_tool(tool_name, arguments),
-            operation_name=operation_name,
-        )
+        """调用 MCP 工具,带统一超时和重试,并记录工具调用日志。"""
+        start = time.perf_counter()
+        try:
+            result = await arun_with_retry(
+                lambda: call_amap_tool(tool_name, arguments),
+                operation_name=operation_name,
+            )
+            log_tool_call(
+                tool_name,
+                arguments,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                success=True,
+            )
+            return result
+        except Exception as exc:
+            log_tool_call(
+                tool_name,
+                arguments,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                success=False,
+                error=str(exc),
+            )
+            raise
 
     @staticmethod
     def _parse_json_result(result: Any) -> Any:

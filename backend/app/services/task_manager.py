@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from ..models.schemas import TaskStatusResponse, TripRequest, TripPlan
+from .tool_logger import set_task_id
 
 
 class TripTaskManager:
@@ -37,6 +38,7 @@ class TripTaskManager:
         return updated
 
     async def run(self, task_id: str, request: TripRequest, planner: Any) -> None:
+        set_task_id(task_id)
         try:
             self.update(task_id, status="running", stage="search_attractions", progress=5, message="🔍 正在搜索景点")
 
