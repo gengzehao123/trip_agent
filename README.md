@@ -1,22 +1,22 @@
-# HelloAgents智能旅行助手 🌍✈️
+# LangGraph智能旅行助手 🌍✈️
 
-基于HelloAgents框架构建的智能旅行规划助手,集成高德地图MCP服务,提供个性化的旅行计划生成。
+基于 LangGraph + LangChain 框架构建的智能旅行规划助手,集成高德地图MCP服务,提供个性化的旅行计划生成。
 
 ## ✨ 功能特点
 
-- 🤖 **AI驱动的旅行规划**: 基于HelloAgents框架的SimpleAgent,智能生成详细的多日旅程
+- 🤖 **AI驱动的旅行规划**: 基于 LangGraph 工作流,智能生成详细的多日旅程
 - 🗺️ **高德地图集成**: 通过MCP协议接入高德地图服务,支持景点搜索、路线规划、天气查询
-- 🧠 **智能工具调用**: Agent自动调用高德地图MCP工具,获取实时POI、路线和天气信息
+- 🧠 **智能工具调用**: 通过 `langchain-mcp-adapters` 把高德MCP工具接入 LangChain,获取实时POI、路线和天气信息
 - 🎨 **现代化前端**: Vue3 + TypeScript + Vite,响应式设计,流畅的用户体验
 - 📱 **完整功能**: 包含住宿、交通、餐饮和景点游览时间推荐
 
 ## 🏗️ 技术栈
 
 ### 后端
-- **框架**: HelloAgents (基于SimpleAgent)
+- **框架**: LangGraph + LangChain
 - **API**: FastAPI
-- **MCP工具**: amap-mcp-server (高德地图)
-- **LLM**: 支持多种LLM提供商(OpenAI, DeepSeek等)
+- **MCP工具**: amap-mcp-server (高德地图), 经 `langchain-mcp-adapters` 接入
+- **LLM**: 支持多种LLM提供商(OpenAI, DeepSeek等), 通过 `ChatOpenAI` 接入
 
 ### 前端
 - **框架**: Vue 3 + TypeScript
@@ -31,16 +31,20 @@
 helloagents-trip-planner/
 ├── backend/                    # 后端服务
 │   ├── app/
-│   │   ├── agents/            # Agent实现
+│   │   ├── agents/            # LangGraph 工作流
 │   │   │   └── trip_planner_agent.py
 │   │   ├── api/               # FastAPI路由
 │   │   │   ├── main.py
 │   │   │   └── routes/
 │   │   │       ├── trip.py
+│   │   │       ├── poi.py
 │   │   │       └── map.py
 │   │   ├── services/          # 服务层
-│   │   │   ├── amap_service.py
-│   │   │   └── llm_service.py
+│   │   │   ├── amap_tools.py      # 高德MCP工具接入
+│   │   │   ├── amap_service.py    # 高德服务封装
+│   │   │   ├── llm_service.py     # LLM服务
+│   │   │   ├── retry.py           # 异步重试/超时
+│   │   │   └── unsplash_service.py
 │   │   ├── models/            # 数据模型
 │   │   │   └── schemas.py
 │   │   └── config.py          # 配置管理
@@ -66,6 +70,7 @@ helloagents-trip-planner/
 - Node.js 16+
 - 高德地图API密钥 (Web服务API和Web端(JS API))
 - LLM API密钥 (OpenAI/DeepSeek等)
+- `uvx` (由 `uv` 提供, 用于运行 amap-mcp-server)
 
 ### 后端安装
 
@@ -133,10 +138,9 @@ npm run dev
 2. 点击"生成旅行计划"按钮
 
 3. 系统将:
-   - 调用HelloAgents Agent生成初步计划
-   - Agent自动调用高德地图MCP工具搜索景点
-   - Agent获取天气信息和路线规划
-   - 整合所有信息生成完整行程
+   - 运行 LangGraph 工作流(搜索景点 → 查询天气 → 搜索酒店 → 生成行程)
+   - 工作流自动调用高德地图MCP工具搜索景点/天气/酒店
+   - LLM 整合所有信息生成完整行程
 
 4. 查看结果:
    - 每日详细行程
@@ -147,36 +151,26 @@ npm run dev
 
 ## 🔧 核心实现
 
-### HelloAgents Agent集成
+### LangGraph 工作流
 
-```python
-from hello_agents import SimpleAgent, HelloAgentsLLM
-from hello_agents.tools import MCPTool
+行程规划由 `backend/app/agents/trip_planner_agent.py` 中的 `LangGraphTripPlanner` 实现,
+是一个 4 节点的 `StateGraph`:
 
-# 创建高德地图MCP工具
-amap_tool = MCPTool(
-    name="amap",
-    server_command=["uvx", "amap-mcp-server"],
-    env={"AMAP_MAPS_API_KEY": "your_api_key"},
-    auto_expand=True
-)
-
-# 创建旅行规划Agent
-agent = SimpleAgent(
-    name="旅行规划助手",
-    llm=HelloAgentsLLM(),
-    system_prompt="你是一个专业的旅行规划助手..."
-)
-
-# 添加工具
-agent.add_tool(amap_tool)
 ```
+search_attractions → query_weather → search_hotels → plan_itinerary
+```
+
+- 前 3 个节点直接调用高德 MCP 工具(经 `langchain-mcp-adapters` 暴露),把结果写入状态
+- `plan_itinerary` 节点调用 LLM 把景点/天气/酒店信息整合成结构化的 `TripPlan`
+- 若 LLM 输出无法通过校验,会自动触发一次 JSON 修复,仍失败则降级为备用计划
 
 ### MCP工具调用
 
-Agent可以自动调用以下高德地图MCP工具:
+`langchain-mcp-adapters` 把 amap-mcp-server 暴露为 LangChain Tool,可用工具包括:
 - `maps_text_search`: 搜索景点POI
 - `maps_weather`: 查询天气
+- `maps_search_detail`: POI详情
+- `maps_geo`: 地理编码
 - `maps_direction_walking_by_address`: 步行路线规划
 - `maps_direction_driving_by_address`: 驾车路线规划
 - `maps_direction_transit_integrated_by_address`: 公共交通路线规划
@@ -187,6 +181,7 @@ Agent可以自动调用以下高德地图MCP工具:
 
 主要端点:
 - `POST /api/trip/plan` - 生成旅行计划
+- `GET /api/trip/tasks/{task_id}` - 查询任务状态
 - `GET /api/map/poi` - 搜索POI
 - `GET /api/map/weather` - 查询天气
 - `POST /api/map/route` - 规划路线
@@ -201,12 +196,11 @@ CC BY-NC-SA 4.0
 
 ## 🙏 致谢
 
-- [HelloAgents](https://github.com/datawhalechina/Hello-Agents) - 智能体教程
-- [HelloAgents框架](https://github.com/jjyaoao/HelloAgents) - 智能体框架
+- [LangChain](https://github.com/langchain-ai/langchain) - LLM 应用框架
+- [LangGraph](https://github.com/langchain-ai/langgraph) - Agent 编排框架
 - [高德地图开放平台](https://lbs.amap.com/) - 地图服务
 - [amap-mcp-server](https://github.com/sugarforever/amap-mcp-server) - 高德地图MCP服务器
 
 ---
 
-**HelloAgents智能旅行助手** - 让旅行计划变得简单而智能 🌈
-
+**LangGraph智能旅行助手** - 让旅行计划变得简单而智能 🌈
