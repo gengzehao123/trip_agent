@@ -77,14 +77,15 @@ async def get_task_status(task_id: str):
 async def health_check():
     """健康检查"""
     try:
-        # 检查Agent是否可用
         agent = get_trip_planner_agent()
-        
+        try:
+            nodes = list(agent.graph.get_graph().nodes.keys())
+        except Exception:
+            nodes = []
         return {
             "status": "healthy",
             "service": "trip-planner",
-            "agent_name": agent.agent.name,
-            "tools_count": len(agent.agent.list_tools())
+            "graph_nodes": nodes,
         }
     except Exception as e:
         raise HTTPException(

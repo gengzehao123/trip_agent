@@ -1,6 +1,5 @@
 """旅行规划任务的进程内状态管理。"""
 
-import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -43,7 +42,7 @@ class TripTaskManager:
             self.update(task_id, stage="weather_query", progress=35, message="正在查询天气")
             self.update(task_id, stage="hotel_search", progress=55, message="正在推荐酒店")
             self.update(task_id, stage="planning", progress=75, message="正在生成行程计划")
-            plan: TripPlan = await asyncio.to_thread(planner.plan_trip, request)
+            plan: TripPlan = await planner.plan_trip(request)
             self.update(
                 task_id,
                 status="completed",
