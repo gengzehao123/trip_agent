@@ -9,6 +9,7 @@ from ...models.schemas import (
     ErrorResponse
 )
 from ...agents.trip_planner_agent import get_trip_planner_agent
+from ...services.session_manager import session_manager
 from ...services.task_manager import task_manager
 
 router = APIRouter(prefix="/trip", tags=["旅行规划"])
@@ -38,11 +39,14 @@ async def plan_trip(request: TripRequest):
         print(f"   天数: {request.travel_days}")
         print(f"{'='*60}\n")
 
-        task = task_manager.create()
+        session_id = session_manager.create(request.session_id)
+        task = task_manager.create(session_id=session_id)
+        session_manager.add_task(session_id, task.task_id)
         agent = get_trip_planner_agent()
         asyncio.create_task(task_manager.run(task.task_id, request, agent))
         return TripTaskCreateResponse(
             task_id=task.task_id,
+            session_id=session_id,
             status=task.status,
             message=task.message,
         )

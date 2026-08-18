@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from ..models.schemas import TaskStatusResponse, TripRequest, TripPlan
-from .tool_logger import set_task_id
+from .tool_logger import set_session_id, set_task_id
 
 
 class TripTaskManager:
@@ -14,9 +14,10 @@ class TripTaskManager:
     def __init__(self):
         self._tasks: Dict[str, TaskStatusResponse] = {}
 
-    def create(self) -> TaskStatusResponse:
+    def create(self, session_id: Optional[str] = None) -> TaskStatusResponse:
         task = TaskStatusResponse(
             task_id=str(uuid4()),
+            session_id=session_id,
             status="queued",
             stage="queued",
             progress=0,
@@ -39,6 +40,9 @@ class TripTaskManager:
 
     async def run(self, task_id: str, request: TripRequest, planner: Any) -> None:
         set_task_id(task_id)
+        session_id = self._tasks[task_id].session_id
+        if session_id:
+            set_session_id(session_id)
         try:
             self.update(task_id, status="running", stage="search_attractions", progress=5, message="🔍 正在搜索景点")
 

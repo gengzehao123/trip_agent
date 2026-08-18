@@ -85,6 +85,7 @@ export interface TripFormData {
   accommodation: string
   preferences: string[]
   free_text_input: string
+  session_id?: string
 }
 
 export interface TripPlanResponse {
@@ -95,12 +96,14 @@ export interface TripPlanResponse {
 
 export interface TripTaskCreateResponse {
   task_id: string
+  session_id?: string
   status: string
   message: string
 }
 
 export interface TaskStatusResponse {
   task_id: string
+  session_id?: string
   status: string
   stage: string
   progress: number

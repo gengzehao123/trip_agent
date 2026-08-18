@@ -6,8 +6,9 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-# 当前任务 ID，用于把工具调用关联到具体任务
+# 当前任务 ID / 会话 ID，用于把工具调用关联到具体任务和会话
 _current_task_id: ContextVar[Optional[str]] = ContextVar("tool_call_task_id", default=None)
+_current_session_id: ContextVar[Optional[str]] = ContextVar("tool_call_session_id", default=None)
 
 _LOG_FILE = Path(__file__).resolve().parent.parent.parent / "logs" / "tool_calls.log"
 _LOG_FILE.parent.mkdir(exist_ok=True)
@@ -32,6 +33,15 @@ def get_task_id() -> Optional[str]:
     return _current_task_id.get()
 
 
+def set_session_id(session_id: str) -> None:
+    """设置当前协程上下文的 session_id。"""
+    _current_session_id.set(session_id)
+
+
+def get_session_id() -> Optional[str]:
+    return _current_session_id.get()
+
+
 def log_tool_call(
     tool_name: str,
     arguments: Dict[str, Any],
@@ -44,6 +54,7 @@ def log_tool_call(
     logger.bind(
         event="tool_call",
         task_id=get_task_id(),
+        session_id=get_session_id(),
         tool=tool_name,
         arguments=arguments,
         duration_ms=round(duration_ms, 2),

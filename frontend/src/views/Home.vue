@@ -267,11 +267,17 @@ const handleSubmit = async () => {
       transportation: formData.transportation,
       accommodation: formData.accommodation,
       preferences: formData.preferences,
-      free_text_input: formData.free_text_input
+      free_text_input: formData.free_text_input,
+      session_id: sessionStorage.getItem('tripSessionId') || undefined
     }
 
     // 创建任务,拿到 task_id
     const task = await createTripTask(requestData)
+
+    // 保存会话 ID,便于后续多轮对话复用同一会话
+    if (task.session_id) {
+      sessionStorage.setItem('tripSessionId', task.session_id)
+    }
 
     // 轮询真实进度,直到完成或失败
     const plan = await pollTaskUntilDone(task.task_id)

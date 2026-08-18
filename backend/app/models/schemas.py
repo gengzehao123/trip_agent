@@ -17,6 +17,7 @@ class TripRequest(BaseModel):
     accommodation: str = Field(..., description="住宿偏好", example="经济型酒店")
     preferences: List[str] = Field(default=[], description="旅行偏好标签", example=["历史文化", "美食"])
     free_text_input: Optional[str] = Field(default="", description="额外要求", example="希望多安排一些博物馆")
+    session_id: Optional[str] = Field(default=None, description="会话 ID(用于多轮对话上下文)")
     
     class Config:
         json_schema_extra = {
@@ -160,6 +161,7 @@ class TripPlanResponse(BaseModel):
 class TripTaskCreateResponse(BaseModel):
     """旅行规划任务创建响应"""
     task_id: str
+    session_id: Optional[str] = None
     status: str
     message: str
 
@@ -167,6 +169,7 @@ class TripTaskCreateResponse(BaseModel):
 class TaskStatusResponse(BaseModel):
     """旅行规划任务状态"""
     task_id: str
+    session_id: Optional[str] = None
     status: str
     stage: str
     progress: int = Field(ge=0, le=100)
