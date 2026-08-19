@@ -63,6 +63,41 @@
 
       <!-- 主内容区 -->
       <div class="main-content">
+        <!-- 会话上下文与多轮修改 -->
+        <a-card v-if="sessionId" title="💬 继续修改行程" :bordered="false" class="conversation-card">
+          <div v-if="conversationMessages.length" class="conversation-history">
+            <div
+              v-for="(item, index) in conversationMessages"
+              :key="`${item.created_at}-${index}`"
+              :class="['conversation-message', item.role]"
+            >
+              <strong>{{ item.role === 'user' ? '你' : '旅行助手' }}</strong>
+              <span>{{ item.content }}</span>
+            </div>
+          </div>
+          <a-empty v-else description="暂无会话历史" :image="false" />
+          <a-textarea
+            v-model:value="revisionInput"
+            :rows="3"
+            :maxlength="2000"
+            show-count
+            :disabled="revisionLoading"
+            placeholder="例如：把第二天改成适合亲子的景点"
+          />
+          <div v-if="revisionLoading" class="revision-progress">
+            <a-progress :percent="revisionProgress" />
+            <span>{{ revisionStatus }}</span>
+          </div>
+          <a-button
+            type="primary"
+            :loading="revisionLoading"
+            :disabled="revisionLoading || !revisionInput.trim()"
+            @click="submitRevision"
+          >
+            修改行程
+          </a-button>
+        </a-card>
+
         <!-- 顶部信息区:左侧概览+预算,右侧地图 -->
         <div class="top-info-section">
           <!-- 左侧:行程概览和预算明细 -->
@@ -315,7 +350,8 @@ import { DownOutlined } from '@ant-design/icons-vue'
 import AMapLoader from '@amap/amap-jsapi-loader'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
-import type { TripPlan } from '@/types'
+import { getConversation, getTaskStatus, reviseTrip } from '@/services/api'
+import type { ConversationMessage, TripPlan } from '@/types'
 
 const router = useRouter()
 const tripPlan = ref<TripPlan | null>(null)
@@ -324,12 +360,34 @@ const originalPlan = ref<TripPlan | null>(null)
 const attractionPhotos = ref<Record<string, string>>({})
 const activeSection = ref('overview')
 const activeDays = ref<number[]>([0]) // 默认展开第一天
+const sessionId = ref(sessionStorage.getItem('tripSessionId') || '')
+const conversationMessages = ref<ConversationMessage[]>([])
+const revisionInput = ref('')
+const revisionLoading = ref(false)
+const revisionProgress = ref(0)
+const revisionStatus = ref('')
 let map: any = null
 
 onMounted(async () => {
   const data = sessionStorage.getItem('tripPlan')
   if (data) {
     tripPlan.value = JSON.parse(data)
+  }
+
+  if (sessionId.value) {
+    try {
+      const conversation = await getConversation(sessionId.value)
+      conversationMessages.value = conversation.messages
+      if (conversation.current_trip_plan) {
+        tripPlan.value = conversation.current_trip_plan
+        sessionStorage.setItem('tripPlan', JSON.stringify(conversation.current_trip_plan))
+      }
+    } catch (error) {
+      console.error('加载会话上下文失败:', error)
+    }
+  }
+
+  if (tripPlan.value) {
     // 加载景点图片
     await loadAttractionPhotos()
     // 等待DOM渲染完成后初始化地图
@@ -337,6 +395,54 @@ onMounted(async () => {
     initMap()
   }
 })
+
+const pollRevisionUntilDone = async (taskId: string): Promise<TripPlan> => {
+  const maxAttempts = 300
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const status = await getTaskStatus(taskId)
+    revisionProgress.value = status.progress
+    revisionStatus.value = status.message
+    if (status.status === 'completed' && status.data) {
+      return status.data
+    }
+    if (status.status === 'failed') {
+      throw new Error(status.error || status.message || '修改行程失败')
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+  throw new Error('修改行程超时,请稍后重试')
+}
+
+const submitRevision = async () => {
+  const content = revisionInput.value.trim()
+  if (!sessionId.value || !content) return
+
+  revisionLoading.value = true
+  revisionProgress.value = 0
+  revisionStatus.value = '正在提交修改...'
+  try {
+    const task = await reviseTrip(sessionId.value, content)
+    const updatedPlan = await pollRevisionUntilDone(task.task_id)
+    tripPlan.value = updatedPlan
+    sessionStorage.setItem('tripPlan', JSON.stringify(updatedPlan))
+    revisionInput.value = ''
+    attractionPhotos.value = {}
+    const conversation = await getConversation(sessionId.value)
+    conversationMessages.value = conversation.messages
+    if (map) {
+      map.destroy()
+      map = null
+    }
+    await loadAttractionPhotos()
+    await nextTick()
+    initMap()
+    message.success('行程已更新')
+  } catch (error: any) {
+    message.error(error.message || '修改行程失败')
+  } finally {
+    revisionLoading.value = false
+  }
+}
 
 const goBack = () => {
   router.push('/')
@@ -973,6 +1079,47 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
   min-width: 0;
 }
 
+.conversation-card {
+  margin-bottom: 20px;
+}
+
+.conversation-history {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  margin-bottom: 16px;
+  background: #f7f8fc;
+  border-radius: 8px;
+}
+
+.conversation-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 80%;
+  gap: 4px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  border-radius: 10px;
+  line-height: 1.6;
+}
+
+.conversation-message.user {
+  margin-left: auto;
+  background: #e6f4ff;
+  text-align: right;
+}
+
+.conversation-message.assistant {
+  margin-right: auto;
+  background: #ffffff;
+  border: 1px solid #e8e8e8;
+}
+
+.revision-progress {
+  margin: 12px 0;
+  color: #666;
+}
+
 /* 景点图片样式 */
 .attraction-image-wrapper {
   position: relative;
@@ -1388,4 +1535,3 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
   }
 }
 </style>
-

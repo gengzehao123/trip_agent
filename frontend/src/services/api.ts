@@ -1,5 +1,10 @@
 import axios from 'axios'
-import type { TripFormData, TripTaskCreateResponse, TaskStatusResponse } from '@/types'
+import type {
+  ConversationResponse,
+  TripFormData,
+  TripTaskCreateResponse,
+  TaskStatusResponse
+} from '@/types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -58,6 +63,36 @@ export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse>
   } catch (error: any) {
     console.error('查询任务状态失败:', error)
     throw new Error(error.response?.data?.detail || error.message || '查询任务状态失败')
+  }
+}
+
+/**
+ * 查询会话上下文
+ */
+export async function getConversation(sessionId: string): Promise<ConversationResponse> {
+  try {
+    const response = await apiClient.get<ConversationResponse>(`/api/conversations/${sessionId}`)
+    return response.data
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || error.message || '查询会话失败')
+  }
+}
+
+/**
+ * 提交自然语言行程修改任务
+ */
+export async function reviseTrip(
+  sessionId: string,
+  content: string
+): Promise<TripTaskCreateResponse> {
+  try {
+    const response = await apiClient.post<TripTaskCreateResponse>(
+      `/api/conversations/${sessionId}/messages`,
+      { content }
+    )
+    return response.data
+  } catch (error: any) {
+    throw new Error(error.response?.data?.detail || error.message || '提交行程修改失败')
   }
 }
 

@@ -101,6 +101,21 @@ export interface TripTaskCreateResponse {
   message: string
 }
 
+export interface ConversationMessage {
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
+export interface ConversationResponse {
+  session_id: string
+  messages: ConversationMessage[]
+  current_trip_plan?: TripPlan
+  user_preferences: string[]
+  created_at: string
+  updated_at: string
+}
+
 export interface TaskStatusResponse {
   task_id: string
   session_id?: string
@@ -112,4 +127,3 @@ export interface TaskStatusResponse {
   error?: string
   updated_at: string
 }
-

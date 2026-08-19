@@ -11,6 +11,7 @@ from ...models.schemas import (
 from ...agents.trip_planner_agent import get_trip_planner_agent
 from ...services.session_manager import session_manager
 from ...services.task_manager import task_manager
+from ...services.conversation_service import conversation_service
 
 router = APIRouter(prefix="/trip", tags=["旅行规划"])
 
@@ -40,6 +41,13 @@ async def plan_trip(request: TripRequest):
         print(f"{'='*60}\n")
 
         session_id = session_manager.create(request.session_id)
+        conversation_service.create(session_id)
+        conversation_service.add_message(
+            session_id,
+            "user",
+            _format_request_message(request),
+        )
+        conversation_service.merge_preferences(session_id, request.preferences)
         task = task_manager.create(session_id=session_id)
         session_manager.add_task(session_id, task.task_id)
         agent = get_trip_planner_agent()
@@ -50,7 +58,6 @@ async def plan_trip(request: TripRequest):
             status=task.status,
             message=task.message,
         )
-
     except Exception as e:
         print(f"❌ 生成旅行计划失败: {str(e)}")
         import traceback
@@ -59,6 +66,16 @@ async def plan_trip(request: TripRequest):
             status_code=500,
             detail=f"生成旅行计划失败: {str(e)}"
         )
+
+
+def _format_request_message(request: TripRequest) -> str:
+    preferences = ", ".join(request.preferences) if request.preferences else "无"
+    extra = request.free_text_input.strip() if request.free_text_input else "无"
+    return (
+        f"请规划{request.city}{request.travel_days}天行程，日期为 "
+        f"{request.start_date} 至 {request.end_date}；交通：{request.transportation}；"
+        f"住宿：{request.accommodation}；偏好：{preferences}；额外要求：{extra}"
+    )
 
 
 @router.get(

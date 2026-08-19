@@ -1,6 +1,6 @@
 """数据模型定义"""
 
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime
 
@@ -149,6 +149,45 @@ class TripPlan(BaseModel):
     weather_info: List[WeatherInfo] = Field(default=[], description="天气信息")
     overall_suggestions: str = Field(..., description="总体建议")
     budget: Optional[Budget] = Field(default=None, description="预算信息")
+
+
+class ConversationMessage(BaseModel):
+    """会话中的一条用户或助手消息。"""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConversationContext(BaseModel):
+    """进程内保存的会话上下文。"""
+
+    session_id: str
+    messages: List[ConversationMessage] = Field(default_factory=list)
+    current_trip_plan: Optional[TripPlan] = None
+    user_preferences: List[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ConversationMessageRequest(BaseModel):
+    """自然语言修改行程请求。"""
+
+    content: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("消息不能为空")
+        return value
+
+
+class ConversationResponse(ConversationContext):
+    """会话查询响应。"""
+
+    pass
 
 
 class TripPlanResponse(BaseModel):

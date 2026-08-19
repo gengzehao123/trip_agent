@@ -32,8 +32,13 @@ class Settings(BaseSettings):
 
     # LLM配置（ChatOpenAI，兼容 OpenAI / DeepSeek 等）
     llm_api_key: str = ""
-    llm_base_url: str = "https://api.deepseek.com"
-    llm_model_id: str = "deepseek-v4-flash"
+    # llm_base_url: str = "https://api.deepseek.com"
+    # llm_model_id: str = "deepseek-v4-flash"
+    llm_base_url: str = "https://api.xiaomimimo.com/v1"
+    llm_model_id: str = "mimo-v2.5"
+
+
+
     llm_temperature: float = 0.7
 
     # 日志配置
