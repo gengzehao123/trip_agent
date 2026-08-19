@@ -43,9 +43,6 @@
             <a-menu-item key="overview">
               <span>📋 行程概览</span>
             </a-menu-item>
-            <a-menu-item key="budget" v-if="tripPlan.budget">
-              <span>💰 预算明细</span>
-            </a-menu-item>
             <a-menu-item key="map">
               <span>📍 景点地图</span>
             </a-menu-item>
@@ -98,9 +95,9 @@
           </a-button>
         </a-card>
 
-        <!-- 顶部信息区:左侧概览+预算,右侧地图 -->
+        <!-- 顶部信息区:左侧概览,右侧地图 -->
         <div class="top-info-section">
-          <!-- 左侧:行程概览和预算明细 -->
+          <!-- 左侧:行程概览 -->
           <div class="left-info">
             <!-- 行程概览 -->
             <a-card id="overview" :title="`${tripPlan.city}旅行计划`" :bordered="false" class="overview-card">
@@ -116,31 +113,6 @@
               </div>
             </a-card>
 
-            <!-- 预算明细 -->
-            <a-card id="budget" v-if="tripPlan.budget" title="💰 预算明细" :bordered="false" class="budget-card">
-              <div class="budget-grid">
-                <div class="budget-item">
-                  <div class="budget-label">景点门票</div>
-                  <div class="budget-value">¥{{ tripPlan.budget.total_attractions }}</div>
-                </div>
-                <div class="budget-item">
-                  <div class="budget-label">酒店住宿</div>
-                  <div class="budget-value">¥{{ tripPlan.budget.total_hotels }}</div>
-                </div>
-                <div class="budget-item">
-                  <div class="budget-label">餐饮费用</div>
-                  <div class="budget-value">¥{{ tripPlan.budget.total_meals }}</div>
-                </div>
-                <div class="budget-item">
-                  <div class="budget-label">交通费用</div>
-                  <div class="budget-value">¥{{ tripPlan.budget.total_transportation }}</div>
-                </div>
-              </div>
-              <div class="budget-total">
-                <span class="total-label">预估总费用</span>
-                <span class="total-value">¥{{ tripPlan.budget.total }}</span>
-              </div>
-            </a-card>
           </div>
 
           <!-- 右侧:地图 -->
@@ -685,27 +657,6 @@ const exportAsImage = async () => {
       (card as HTMLElement).style.setProperty('background-color', '#e0f7fa')
     })
 
-    // 处理预算总计
-    const budgetTotal = exportContainer.querySelector('.budget-total')
-    if (budgetTotal) {
-      const el = budgetTotal as HTMLElement
-      el.style.setProperty('background-color', '#667eea')
-      el.style.setProperty('color', '#ffffff')
-      el.style.setProperty('padding', '20px')
-      el.style.setProperty('border-radius', '12px')
-      el.style.setProperty('margin-bottom', '20px')
-    }
-
-    // 处理预算项
-    const budgetItems = exportContainer.querySelectorAll('.budget-item')
-    budgetItems.forEach((item) => {
-      const el = item as HTMLElement
-      el.style.setProperty('background-color', '#f5f7fa')
-      el.style.setProperty('padding', '16px')
-      el.style.setProperty('border-radius', '8px')
-      el.style.setProperty('margin-bottom', '12px')
-    })
-
     // 添加到body(隐藏)
     exportContainer.style.position = 'absolute'
     exportContainer.style.left = '-9999px'
@@ -822,27 +773,6 @@ const exportAsPDF = async () => {
       (card as HTMLElement).style.setProperty('background-color', '#e0f7fa')
     })
 
-    // 处理预算总计
-    const budgetTotal = exportContainer.querySelector('.budget-total')
-    if (budgetTotal) {
-      const el = budgetTotal as HTMLElement
-      el.style.setProperty('background-color', '#667eea')
-      el.style.setProperty('color', '#ffffff')
-      el.style.setProperty('padding', '20px')
-      el.style.setProperty('border-radius', '12px')
-      el.style.setProperty('margin-bottom', '20px')
-    }
-
-    // 处理预算项
-    const budgetItems = exportContainer.querySelectorAll('.budget-item')
-    budgetItems.forEach((item) => {
-      const el = item as HTMLElement
-      el.style.setProperty('background-color', '#f5f7fa')
-      el.style.setProperty('padding', '16px')
-      el.style.setProperty('border-radius', '8px')
-      el.style.setProperty('margin-bottom', '12px')
-    })
-
     // 添加到body(隐藏)
     exportContainer.style.position = 'absolute'
     exportContainer.style.left = '-9999px'
@@ -895,6 +825,11 @@ const exportAsPDF = async () => {
 // 初始化地图
 const initMap = async () => {
   try {
+    // 高德 JS API 2.0 要求在加载 SDK 前设置安全配置。
+    window._AMapSecurityConfig = {
+      securityJsCode: import.meta.env.VITE_AMAP_SECURITY_CODE
+    }
+
     const AMap = await AMapLoader.load({
       key: import.meta.env.VITE_AMAP_WEB_JS_KEY,  // 高德地图Web端(JS API) Key
       version: '2.0',
@@ -912,9 +847,9 @@ const initMap = async () => {
     addAttractionMarkers(AMap)
 
     message.success('地图加载成功')
-  } catch (error) {
+  } catch (error: any) {
     console.error('地图加载失败:', error)
-    message.error('地图加载失败')
+    message.error(error?.message || '地图加载失败，请检查高德地图 Key 和安全密钥配置')
   }
 }
 
@@ -1305,58 +1240,6 @@ const drawRoutes = (AMap: any, attractions: any[]) => {
   font-size: 15px;
   color: #333;
   line-height: 1.6;
-}
-
-/* 预算卡片 */
-.budget-card {
-  height: fit-content;
-}
-
-.budget-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.budget-item {
-  text-align: center;
-  padding: 12px;
-  background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
-  border-radius: 8px;
-  border: 1px solid #e8e8e8;
-}
-
-.budget-label {
-  font-size: 13px;
-  color: #666;
-  margin-bottom: 8px;
-}
-
-.budget-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1890ff;
-}
-
-.budget-total {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 8px;
-  color: white;
-}
-
-.total-label {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.total-value {
-  font-size: 28px;
-  font-weight: 700;
 }
 
 /* 地图卡片 */
